@@ -423,10 +423,10 @@
                     card.innerHTML = `
                         <div class="bg-gray-50 px-4 py-2 border-b border-gray-200 flex items-center justify-between group">
                             <span class="font-semibold text-gray-700 truncate" id="name-${student.id}"></span>
-                            <span class="text-xs text-gray-400 hidden group-hover:inline-block bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded">點擊批改</span>
+                            <span class="text-xs text-gray-400 hidden group-hover:inline-block bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded shadow-sm">點擊批改</span>
                             <span class="text-xs text-gray-400 group-hover:hidden" id="time-${student.id}"></span>
                         </div>
-                        <div class="aspect-[4/3] bg-white w-full relative">
+                        <div class="aspect-[4/3] bg-white w-full relative pointer-events-none">
                             <img id="img-${student.id}" src="" alt="白板" class="absolute inset-0 w-full h-full object-contain hidden" />
                             <div id="blank-${student.id}" class="absolute inset-0 flex items-center justify-center text-gray-300">
                                 <p>空白畫布</p>
@@ -475,7 +475,7 @@
             if (student.canvasData) {
                 const img = new Image();
                 img.onload = () => {
-                    // 設定 canvas 內部解析度與圖片一致，CSS 會負責將其等比例縮放至適合螢幕
+                    // 設定 canvas 內部解析度與圖片一致
                     tCanvas.width = img.width;
                     tCanvas.height = img.height;
                     tCtx.drawImage(img, 0, 0);
@@ -543,7 +543,11 @@
             const { x, y } = getTPos(e);
             tCtx.lineTo(x, y);
             tCtx.strokeStyle = tCurrentTool === 'eraser' ? '#ffffff' : '#ef4444'; // 老師固定用紅筆
-            tCtx.lineWidth = tCurrentTool === 'eraser' ? eraserLineWidth : penLineWidth * 1.5; // 紅筆稍微粗一點
+            
+            // 關鍵修正：讓老師的筆觸根據學生的畫布大小動態加粗，防止在大螢幕 iPad 上變太細看不到
+            const scaleBase = Math.max(1, (tCanvas.width / 800)); 
+            tCtx.lineWidth = tCurrentTool === 'eraser' ? (eraserLineWidth * scaleBase) : (penLineWidth * 2 * scaleBase + 2);
+            
             tCtx.lineCap = 'round';
             tCtx.lineJoin = 'round';
             tCtx.stroke();
@@ -600,6 +604,11 @@
             const collectionName = `whiteboard_room_${currentRoomId}`;
             const docRef = doc(db, 'artifacts', appId, 'public', 'data', collectionName, currentUser.uid);
             
+            // 清理舊的監聽器避免重複繪圖問題
+            if (studentUnsubscribe) {
+                studentUnsubscribe();
+            }
+
             studentUnsubscribe = onSnapshot(docRef, (docSnap) => {
                 if (docSnap.exists()) {
                     const data = docSnap.data();
