@@ -170,12 +170,41 @@
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Firebase 設置 (請遵循 Rule 3 確保認證)
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        // ===== Firebase 設置 =====
+        // 注意：如果你將此程式碼部署到 GitHub Pages 等外部平台，
+        // 必須在此處填寫你自己的 Firebase 專案設定，否則會一直卡在載入畫面！
+        const fallbackConfig = {
+            apiKey: "AIzaSyCldHil1LVY-S3t1p8Kd7x5ttO0nVHbucs",
+            authDomain: "share-platform-51973.firebaseapp.com",
+            projectId: "share-platform-51973",
+            storageBucket: "share-platform-51973.firebasestorage.app",
+            messagingSenderId: "920950108502",
+            appId: "1:920950108502:web:a6c931dac3c982cf6366f7",
+            measurementId: "G-C56GV311K9"
+        };
+
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : fallbackConfig;
+
+        // 檢查是否缺少 Firebase 設定 (部署至 GitHub 時常見問題)
+        if (Object.keys(firebaseConfig).length === 0) {
+            const loadingView = document.getElementById('loading-view');
+            loadingView.innerHTML = `
+                <div class="bg-white p-8 rounded-2xl shadow-xl max-w-md text-center border-t-4 border-red-500 m-4">
+                    <i class="fa-solid fa-triangle-exclamation text-4xl text-red-500 mb-4"></i>
+                    <h2 class="text-xl font-bold text-gray-800 mb-2">缺少 Firebase 連線設定</h2>
+                    <p class="text-gray-600 mb-4">系統偵測到你正於外部平台 (如 GitHub Pages) 執行此程式，但尚未設定 Firebase 專案。</p>
+                    <div class="bg-gray-100 p-3 rounded text-left text-sm text-gray-700 overflow-x-auto">
+                        請打開原始碼 (index.html)，找到 <code>fallbackConfig</code>，並填入你專屬的 Firebase 設定資料。
+                    </div>
+                </div>
+            `;
+            throw new Error("Missing Firebase Config.");
+        }
+
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-html-whiteboard';
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'github-pages-whiteboard';
 
         // 全域狀態
         let currentUser = null;
@@ -209,7 +238,14 @@
                 }
             } catch (err) {
                 console.error("認證失敗:", err);
-                alert("無法連接伺服器，請重試。");
+                const loadingView = document.getElementById('loading-view');
+                loadingView.innerHTML = `
+                    <div class="bg-white p-8 rounded-2xl shadow-xl max-w-md text-center border-t-4 border-red-500 m-4">
+                        <h2 class="text-xl font-bold text-gray-800 mb-2">連線失敗</h2>
+                        <p class="text-gray-600 text-sm break-words">${err.message}</p>
+                        <p class="text-gray-500 text-sm mt-4">請確保你的 Firebase Config 正確，且已在 Firebase 後台啟用「匿名登入 (Anonymous)」。</p>
+                    </div>
+                `;
             }
 
             onAuthStateChanged(auth, (user) => {
