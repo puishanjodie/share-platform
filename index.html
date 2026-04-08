@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         /* 防止畫布在觸控時發生滾動或縮放行為 */
-        #student-canvas {
+        #student-canvas, #teacher-modal-canvas {
             touch-action: none; 
         }
         .hidden-view {
@@ -22,7 +22,7 @@
 <body class="bg-gray-50 text-gray-800 font-sans min-h-screen">
 
     <!-- 載入中畫面 -->
-    <div id="loading-view" class="flex items-center justify-center min-h-screen bg-gray-100">
+    <div id="loading-view" class="flex items-center justify-center min-h-screen bg-gray-100 z-50 absolute inset-0">
         <div class="text-xl font-semibold animate-pulse text-indigo-600">系統連線中...</div>
     </div>
 
@@ -76,7 +76,7 @@
     </div>
 
     <!-- 老師監控儀表板視圖 -->
-    <div id="teacher-view" class="hidden-view flex-col md:flex-row h-screen overflow-hidden bg-gray-100">
+    <div id="teacher-view" class="hidden-view flex-col md:flex-row h-screen overflow-hidden bg-gray-100 relative">
         <!-- 左側邊欄 -->
         <div class="w-full md:w-72 bg-white shadow-lg flex flex-col z-10 shrink-0">
             <div class="p-6 bg-indigo-600 text-white">
@@ -115,6 +115,32 @@
             </div>
             <div id="teacher-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 hidden-view">
                 <!-- 學生畫布動態生成於此 -->
+            </div>
+        </div>
+
+        <!-- 老師批改/放大視圖 (Modal) -->
+        <div id="teacher-modal-view" class="hidden-view absolute inset-0 z-50 bg-gray-900 bg-opacity-95 flex flex-col">
+            <div class="bg-white p-3 flex justify-between items-center shrink-0 shadow-md">
+                <div class="flex items-center gap-4 px-2">
+                    <span id="teacher-modal-name" class="font-bold text-xl text-gray-800"></span>
+                    <span class="text-sm font-bold text-red-600 bg-red-100 border border-red-200 px-3 py-1 rounded-full"><i class="fa-solid fa-pen-nib mr-1"></i>批改模式</span>
+                </div>
+                <div class="flex items-center gap-2 bg-gray-100 p-1 rounded-xl border border-gray-200">
+                    <button id="t-tool-pen" class="t-tool-btn p-3 rounded-lg bg-red-100 text-red-600" title="紅筆">
+                        <i class="fa-solid fa-pen"></i>
+                    </button>
+                    <button id="t-tool-eraser" class="t-tool-btn p-3 rounded-lg text-gray-600 hover:bg-gray-200" title="橡皮擦">
+                        <i class="fa-solid fa-eraser"></i>
+                    </button>
+                    <div class="w-px h-8 bg-gray-300 mx-2"></div>
+                    <button id="btn-close-modal" class="p-2 hover:bg-gray-200 rounded-lg text-gray-700 flex items-center gap-2 font-medium px-4 transition-colors">
+                        <i class="fa-solid fa-xmark text-xl"></i> <span class="hidden sm:inline">完成並返回</span>
+                    </button>
+                </div>
+            </div>
+            <div id="teacher-modal-container" class="flex-grow relative p-4 flex items-center justify-center overflow-hidden">
+                <!-- max-w-full 和 max-h-full 讓畫布在不變形的情況下盡可能放大 -->
+                <canvas id="teacher-modal-canvas" class="bg-white max-w-full max-h-full shadow-2xl cursor-crosshair rounded-sm"></canvas>
             </div>
         </div>
     </div>
@@ -171,8 +197,6 @@
         import { getFirestore, collection, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // ===== Firebase 設置 =====
-        // 注意：如果你將此程式碼部署到 GitHub Pages 等外部平台，
-        // 必須在此處填寫你自己的 Firebase 專案設定，否則會一直卡在載入畫面！
         const fallbackConfig = {
             apiKey: "AIzaSyCldHil1LVY-S3t1p8Kd7x5ttO0nVHbucs",
             authDomain: "share-platform-51973.firebaseapp.com",
@@ -185,17 +209,11 @@
 
         const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : fallbackConfig;
 
-        // 檢查是否缺少 Firebase 設定 (部署至 GitHub 時常見問題)
         if (Object.keys(firebaseConfig).length === 0) {
-            const loadingView = document.getElementById('loading-view');
-            loadingView.innerHTML = `
+            document.getElementById('loading-view').innerHTML = `
                 <div class="bg-white p-8 rounded-2xl shadow-xl max-w-md text-center border-t-4 border-red-500 m-4">
-                    <i class="fa-solid fa-triangle-exclamation text-4xl text-red-500 mb-4"></i>
                     <h2 class="text-xl font-bold text-gray-800 mb-2">缺少 Firebase 連線設定</h2>
-                    <p class="text-gray-600 mb-4">系統偵測到你正於外部平台 (如 GitHub Pages) 執行此程式，但尚未設定 Firebase 專案。</p>
-                    <div class="bg-gray-100 p-3 rounded text-left text-sm text-gray-700 overflow-x-auto">
-                        請打開原始碼 (index.html)，找到 <code>fallbackConfig</code>，並填入你專屬的 Firebase 設定資料。
-                    </div>
+                    <p class="text-gray-600 mb-4">請在原始碼中填寫 Firebase config</p>
                 </div>
             `;
             throw new Error("Missing Firebase Config.");
@@ -211,13 +229,20 @@
         let currentRoomId = '';
         let currentStudentName = '';
         let teacherUnsubscribe = null;
+        let studentUnsubscribe = null;
+        let currentStudentsDict = {}; // 用於儲存學生最新資料供放大檢視用
 
-        // 畫布狀態
+        // 學生畫布狀態
         let isDrawing = false;
         let selectedColor = '#000000';
-        let currentTool = 'pen'; // 'pen' or 'eraser'
+        let currentTool = 'pen'; 
         let penLineWidth = 3;
         let eraserLineWidth = 20;
+
+        // 老師批改畫布狀態
+        let editingStudentId = null;
+        let tIsDrawing = false;
+        let tCurrentTool = 'pen'; // 'pen' 或 'eraser'
 
         // DOM 元素取得
         const views = {
@@ -238,12 +263,10 @@
                 }
             } catch (err) {
                 console.error("認證失敗:", err);
-                const loadingView = document.getElementById('loading-view');
-                loadingView.innerHTML = `
+                document.getElementById('loading-view').innerHTML = `
                     <div class="bg-white p-8 rounded-2xl shadow-xl max-w-md text-center border-t-4 border-red-500 m-4">
                         <h2 class="text-xl font-bold text-gray-800 mb-2">連線失敗</h2>
                         <p class="text-gray-600 text-sm break-words">${err.message}</p>
-                        <p class="text-gray-500 text-sm mt-4">請確保你的 Firebase Config 正確，且已在 Firebase 後台啟用「匿名登入 (Anonymous)」。</p>
                     </div>
                 `;
             }
@@ -276,7 +299,6 @@
 
         // ===== 3. 首頁與加入邏輯 =====
         document.getElementById('btn-create-room').addEventListener('click', () => {
-            // 生成 6 位數房間代碼
             currentRoomId = Math.floor(100000 + Math.random() * 900000).toString();
             setupTeacherDashboard();
             showView('teacher');
@@ -308,13 +330,12 @@
         });
 
         function leaveRoom() {
-            if (teacherUnsubscribe) {
-                teacherUnsubscribe();
-                teacherUnsubscribe = null;
-            }
+            if (teacherUnsubscribe) { teacherUnsubscribe(); teacherUnsubscribe = null; }
+            if (studentUnsubscribe) { studentUnsubscribe(); studentUnsubscribe = null; }
             currentRoomId = '';
             currentStudentName = '';
-            // 清除網址參數但不刷新頁面
+            editingStudentId = null;
+            document.getElementById('teacher-modal-view').classList.add('hidden-view');
             window.history.pushState({}, document.title, window.location.pathname);
             showView('home');
         }
@@ -326,7 +347,6 @@
         function setupTeacherDashboard() {
             document.getElementById('teacher-room-display').textContent = currentRoomId;
             
-            // 建立 QR Code
             const currentUrl = window.location.href.split('?')[0];
             const urlWithRoom = `${currentUrl}?room=${currentRoomId}`;
             const qrImg = document.getElementById('qr-code-img');
@@ -337,6 +357,7 @@
             document.getElementById('teacher-empty-state').classList.remove('hidden-view');
             document.getElementById('teacher-grid').classList.add('hidden-view');
             
+            currentStudentsDict = {};
             listenToStudents();
         }
 
@@ -348,8 +369,12 @@
 
             teacherUnsubscribe = onSnapshot(q, (snapshot) => {
                 const students = [];
+                currentStudentsDict = {}; // 更新字典
+                
                 snapshot.forEach(doc => {
-                    students.push({ id: doc.id, ...doc.data() });
+                    const data = { id: doc.id, ...doc.data() };
+                    students.push(data);
+                    currentStudentsDict[doc.id] = data;
                 });
 
                 students.sort((a, b) => a.joinedAt - b.joinedAt);
@@ -374,29 +399,32 @@
                 grid.classList.remove('hidden-view');
             }
 
-            // 使用比對更新 DOM 避免圖片閃爍
             const existingIds = new Set(Array.from(grid.children).map(child => child.id.replace('card-', '')));
             const newIds = new Set(students.map(s => s.id));
 
-            // 移除退出房間的學生
             existingIds.forEach(id => {
                 if (!newIds.has(id)) {
                     document.getElementById(`card-${id}`).remove();
                 }
             });
 
-            // 更新或新增學生畫布
             students.forEach(student => {
                 let card = document.getElementById(`card-${student.id}`);
                 
                 if (!card) {
                     card = document.createElement('div');
                     card.id = `card-${student.id}`;
-                    card.className = "bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col";
+                    // 加入 cursor-pointer 和 hover 效果，提示老師可以點擊
+                    card.className = "bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col cursor-pointer hover:shadow-lg hover:border-indigo-400 transition-all transform hover:-translate-y-1";
+                    
+                    // 點擊事件：開啟老師批改視窗
+                    card.onclick = () => openTeacherModal(student.id);
+
                     card.innerHTML = `
-                        <div class="bg-gray-50 px-4 py-2 border-b border-gray-200 flex items-center justify-between">
+                        <div class="bg-gray-50 px-4 py-2 border-b border-gray-200 flex items-center justify-between group">
                             <span class="font-semibold text-gray-700 truncate" id="name-${student.id}"></span>
-                            <span class="text-xs text-gray-400" id="time-${student.id}"></span>
+                            <span class="text-xs text-gray-400 hidden group-hover:inline-block bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded">點擊批改</span>
+                            <span class="text-xs text-gray-400 group-hover:hidden" id="time-${student.id}"></span>
                         </div>
                         <div class="aspect-[4/3] bg-white w-full relative">
                             <img id="img-${student.id}" src="" alt="白板" class="absolute inset-0 w-full h-full object-contain hidden" />
@@ -429,6 +457,131 @@
             });
         }
 
+        // ===== 4.5 老師批改功能 (Modal) =====
+        const tCanvas = document.getElementById('teacher-modal-canvas');
+        const tCtx = tCanvas.getContext('2d');
+        const tModalView = document.getElementById('teacher-modal-view');
+
+        function openTeacherModal(studentId) {
+            const student = currentStudentsDict[studentId];
+            if (!student) return;
+            
+            editingStudentId = studentId;
+            document.getElementById('teacher-modal-name').textContent = `${student.userName} 的作品`;
+            tModalView.classList.remove('hidden-view');
+            setTTool('pen');
+
+            // 載入學生畫布
+            if (student.canvasData) {
+                const img = new Image();
+                img.onload = () => {
+                    // 設定 canvas 內部解析度與圖片一致，CSS 會負責將其等比例縮放至適合螢幕
+                    tCanvas.width = img.width;
+                    tCanvas.height = img.height;
+                    tCtx.drawImage(img, 0, 0);
+                };
+                img.src = student.canvasData;
+            } else {
+                // 若為空，給予預設大小
+                tCanvas.width = 1024;
+                tCanvas.height = 768;
+                tCtx.fillStyle = '#ffffff';
+                tCtx.fillRect(0, 0, tCanvas.width, tCanvas.height);
+            }
+        }
+
+        document.getElementById('btn-close-modal').addEventListener('click', () => {
+            tModalView.classList.add('hidden-view');
+            editingStudentId = null;
+        });
+
+        // 老師工具切換
+        function setTTool(t) {
+            tCurrentTool = t;
+            const penBtn = document.getElementById('t-tool-pen');
+            const eraserBtn = document.getElementById('t-tool-eraser');
+            if(t === 'pen') {
+                penBtn.className = "t-tool-btn p-3 rounded-lg bg-red-100 text-red-600";
+                eraserBtn.className = "t-tool-btn p-3 rounded-lg text-gray-600 hover:bg-gray-200";
+            } else {
+                eraserBtn.className = "t-tool-btn p-3 rounded-lg bg-red-100 text-red-600";
+                penBtn.className = "t-tool-btn p-3 rounded-lg text-gray-600 hover:bg-gray-200";
+            }
+        }
+        document.getElementById('t-tool-pen').addEventListener('click', () => setTTool('pen'));
+        document.getElementById('t-tool-eraser').addEventListener('click', () => setTTool('eraser'));
+
+        // 老師繪圖事件
+        function getTPos(e) {
+            const rect = tCanvas.getBoundingClientRect();
+            // 計算 CSS 縮放比例，確保滑鼠位置對應到正確的 Canvas 內部座標
+            const scaleX = tCanvas.width / rect.width;
+            const scaleY = tCanvas.height / rect.height;
+
+            if (e.touches && e.touches.length > 0) {
+                return {
+                    x: (e.touches[0].clientX - rect.left) * scaleX,
+                    y: (e.touches[0].clientY - rect.top) * scaleY
+                };
+            }
+            return {
+                x: (e.clientX - rect.left) * scaleX,
+                y: (e.clientY - rect.top) * scaleY
+            };
+        }
+
+        function tStartDraw(e) {
+            tIsDrawing = true;
+            const { x, y } = getTPos(e);
+            tCtx.beginPath();
+            tCtx.moveTo(x, y);
+        }
+
+        function tDraw(e) {
+            if (!tIsDrawing) return;
+            if (e.cancelable) e.preventDefault(); 
+            const { x, y } = getTPos(e);
+            tCtx.lineTo(x, y);
+            tCtx.strokeStyle = tCurrentTool === 'eraser' ? '#ffffff' : '#ef4444'; // 老師固定用紅筆
+            tCtx.lineWidth = tCurrentTool === 'eraser' ? eraserLineWidth : penLineWidth * 1.5; // 紅筆稍微粗一點
+            tCtx.lineCap = 'round';
+            tCtx.lineJoin = 'round';
+            tCtx.stroke();
+        }
+
+        function tEndDraw() {
+            if (tIsDrawing) {
+                tCtx.closePath();
+                tIsDrawing = false;
+                syncTeacherCanvasToFirebase(); // 老師畫完即刻同步回傳給學生
+            }
+        }
+
+        tCanvas.addEventListener('mousedown', tStartDraw);
+        tCanvas.addEventListener('mousemove', tDraw);
+        window.addEventListener('mouseup', tEndDraw); 
+        tCanvas.addEventListener('touchstart', tStartDraw, { passive: false });
+        tCanvas.addEventListener('touchmove', tDraw, { passive: false });
+        window.addEventListener('touchend', tEndDraw);
+
+        // 將老師批改後的畫面同步回 Firebase
+        async function syncTeacherCanvasToFirebase() {
+            if (!editingStudentId || !currentRoomId) return;
+            const collectionName = `whiteboard_room_${currentRoomId}`;
+            const docRef = doc(db, 'artifacts', appId, 'public', 'data', collectionName, editingStudentId);
+            
+            try {
+                const canvasData = tCanvas.toDataURL('image/jpeg', 0.6); 
+                await setDoc(docRef, {
+                    canvasData: canvasData,
+                    lastUpdate: Date.now(),
+                    lastModifiedBy: 'teacher' // 標記為老師修改
+                }, { merge: true });
+            } catch (error) {
+                console.error("同步批改畫面失敗:", error);
+            }
+        }
+
         // ===== 5. 學生白板邏輯 =====
         const canvas = document.getElementById('student-canvas');
         const ctx = canvas.getContext('2d');
@@ -440,11 +593,31 @@
             
             initColorPicker();
             resizeCanvas();
-            clearCanvas(false); // 初始化全白背景，暫不同步
-            syncCanvasToFirebase(); // 加入時發送一次空畫布
+            clearCanvas(false); 
+            syncCanvasToFirebase(); // 加入時發送一次
+
+            // *** 學生端新增：監聽來自老師的批改更新 ***
+            const collectionName = `whiteboard_room_${currentRoomId}`;
+            const docRef = doc(db, 'artifacts', appId, 'public', 'data', collectionName, currentUser.uid);
+            
+            studentUnsubscribe = onSnapshot(docRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    // 只有當「最後修改者是老師」時，學生端才更新畫面 (避免自己畫的導致無限迴圈)
+                    if (data.lastModifiedBy === 'teacher' && data.canvasData) {
+                        const img = new Image();
+                        img.onload = () => {
+                            // 清空現有畫布，並將老師批改過(包含原圖)的畫面畫上來
+                            ctx.clearRect(0, 0, canvas.width, canvas.height);
+                            // 調整大小填滿畫布
+                            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                        };
+                        img.src = data.canvasData;
+                    }
+                }
+            });
         }
 
-        // 處理畫布大小
         function resizeCanvas() {
             const tempImageData = canvas.toDataURL();
             canvas.width = container.clientWidth;
@@ -461,7 +634,6 @@
         }
         window.addEventListener('resize', resizeCanvas);
 
-        // 工具列邏輯
         const colors = ['#000000', '#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6'];
         
         function initColorPicker() {
@@ -474,7 +646,6 @@
                 btn.onclick = () => selectColor(c, btn);
                 picker.appendChild(btn);
             });
-            // 預設選擇黑色
             selectColor(colors[0], picker.children[0]);
         }
 
@@ -515,19 +686,12 @@
             if (shouldSync) syncCanvasToFirebase();
         }
 
-        // 繪圖事件處理 (滑鼠與觸控)
         function getPos(e) {
             const rect = canvas.getBoundingClientRect();
             if (e.touches && e.touches.length > 0) {
-                return {
-                    x: e.touches[0].clientX - rect.left,
-                    y: e.touches[0].clientY - rect.top
-                };
+                return { x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top };
             }
-            return {
-                x: e.clientX - rect.left,
-                y: e.clientY - rect.top
-            };
+            return { x: e.clientX - rect.left, y: e.clientY - rect.top };
         }
 
         function startDraw(e) {
@@ -539,7 +703,6 @@
 
         function draw(e) {
             if (!isDrawing) return;
-            // 阻止預設行為避免拖曳畫面
             if (e.cancelable) e.preventDefault(); 
             
             const { x, y } = getPos(e);
@@ -555,19 +718,17 @@
             if (isDrawing) {
                 ctx.closePath();
                 isDrawing = false;
-                syncCanvasToFirebase(); // 提筆時同步
+                syncCanvasToFirebase(); 
             }
         }
 
         canvas.addEventListener('mousedown', startDraw);
         canvas.addEventListener('mousemove', draw);
-        window.addEventListener('mouseup', endDraw); // 使用 window 避免在畫布外放開沒偵測到
-        
+        window.addEventListener('mouseup', endDraw); 
         canvas.addEventListener('touchstart', startDraw, { passive: false });
         canvas.addEventListener('touchmove', draw, { passive: false });
         window.addEventListener('touchend', endDraw);
 
-        // 同步至 Firebase
         async function syncCanvasToFirebase() {
             if (!currentUser || !currentRoomId) return;
 
@@ -575,19 +736,19 @@
             const docRef = doc(db, 'artifacts', appId, 'public', 'data', collectionName, currentUser.uid);
             
             try {
-                const canvasData = canvas.toDataURL('image/jpeg', 0.5); // 壓縮為 jpeg 加快同步
+                const canvasData = canvas.toDataURL('image/jpeg', 0.5); 
                 await setDoc(docRef, {
                     userName: currentStudentName,
                     canvasData: canvasData,
                     lastUpdate: Date.now(),
-                    joinedAt: Date.now() // 單純供排序用
+                    joinedAt: Date.now(), 
+                    lastModifiedBy: 'student' // 標記為學生修改
                 }, { merge: true });
             } catch (error) {
                 console.error("同步畫布失敗:", error);
             }
         }
 
-        // 啟動程式
         initApp();
 
     </script>
