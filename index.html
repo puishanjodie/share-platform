@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <!-- 確保在 iPad / 手機上不會因為雙擊或縮放而影響繪圖體驗 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>課堂互動白板</title>
+    <!-- 引入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 FontAwesome 圖示 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* 防止畫布在觸控時發生滾動或縮放行為 */
+        #student-canvas {
+            touch-action: none; 
+        }
+        .hidden-view {
+            display: none !important;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800 font-sans min-h-screen">
+
+    <!-- 載入中畫面 -->
+    <div id="loading-view" class="flex items-center justify-center min-h-screen bg-gray-100">
+        <div class="text-xl font-semibold animate-pulse text-indigo-600">系統連線中...</div>
+    </div>
+
+    <!-- 首頁視圖 -->
+    <div id="home-view" class="hidden-view flex-col items-center justify-center min-h-screen p-4">
+        <div class="max-w-md w-full bg-white rounded-2xl shadow-xl overflow-hidden">
+            <div class="bg-indigo-600 p-6 text-center text-white">
+                <h1 class="text-3xl font-bold mb-2">課堂互動白板</h1>
+                <p class="text-indigo-200">即時共享與繪圖平台</p>
+            </div>
+            <div class="p-8 space-y-6">
+                <button id="btn-create-room" class="w-full flex items-center justify-center gap-3 bg-indigo-600 hover:bg-indigo-700 text-white py-4 px-6 rounded-xl text-lg font-medium transition-colors shadow-md">
+                    <i class="fa-solid fa-desktop text-xl"></i>
+                    我是老師 (建立教室)
+                </button>
+                <div class="relative flex items-center py-2">
+                    <div class="flex-grow border-t border-gray-300"></div>
+                    <span class="flex-shrink-0 mx-4 text-gray-400 text-sm">或者</span>
+                    <div class="flex-grow border-t border-gray-300"></div>
+                </div>
+                <button id="btn-go-join" class="w-full flex items-center justify-center gap-3 bg-white border-2 border-indigo-600 text-indigo-600 hover:bg-indigo-50 py-4 px-6 rounded-xl text-lg font-medium transition-colors shadow-sm">
+                    <i class="fa-solid fa-mobile-screen text-xl"></i>
+                    我是學生 (加入教室)
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 學生加入視圖 -->
+    <div id="student-join-view" class="hidden-view flex-col items-center justify-center min-h-screen p-4">
+        <div class="max-w-md w-full bg-white rounded-2xl shadow-xl p-8">
+            <h2 class="text-2xl font-bold text-center text-gray-800 mb-6">加入教室</h2>
+            <form id="join-form" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">房間代碼</label>
+                    <input type="text" id="input-room-id" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-lg text-center tracking-widest" placeholder="例如: 123456" maxLength="6" required>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">你的姓名</label>
+                    <input type="text" id="input-student-name" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-lg text-center" placeholder="請輸入姓名" maxLength="15" required>
+                </div>
+                <p id="join-error" class="text-red-500 text-sm text-center hidden-view"></p>
+                <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-lg text-lg font-medium transition-colors mt-4">
+                    進入白板
+                </button>
+                <button type="button" id="btn-back-home" class="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 py-3 rounded-lg text-lg font-medium transition-colors mt-2">
+                    返回
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- 老師監控儀表板視圖 -->
+    <div id="teacher-view" class="hidden-view flex-col md:flex-row h-screen overflow-hidden bg-gray-100">
+        <!-- 左側邊欄 -->
+        <div class="w-full md:w-72 bg-white shadow-lg flex flex-col z-10 shrink-0">
+            <div class="p-6 bg-indigo-600 text-white">
+                <h2 class="text-xl font-bold mb-1">老師主機</h2>
+                <p class="text-indigo-200 text-sm">即時監控畫面</p>
+            </div>
+            <div class="p-6 flex-grow flex flex-col items-center overflow-y-auto">
+                <div class="bg-indigo-50 w-full p-4 rounded-xl text-center mb-6">
+                    <p class="text-sm text-gray-500 mb-1">房間代碼</p>
+                    <p id="teacher-room-display" class="text-4xl font-black text-indigo-700 tracking-widest">---</p>
+                </div>
+                <div class="bg-white p-2 rounded-xl shadow-sm border border-gray-200 mb-4">
+                    <img id="qr-code-img" src="" alt="QR Code" class="w-40 h-40 object-contain hidden" />
+                </div>
+                <p class="text-xs text-gray-400 text-center mb-8">
+                    讓學生使用 iPad 掃描此 QR Code，或輸入房間代碼加入
+                </p>
+                <div class="mt-auto w-full space-y-4">
+                    <div class="flex items-center gap-2 text-gray-600 bg-gray-50 p-3 rounded-lg">
+                        <i class="fa-solid fa-users"></i>
+                        <span id="student-count" class="font-medium">已連接學生：0 人</span>
+                    </div>
+                    <button id="btn-end-class" class="w-full flex items-center justify-center gap-2 text-red-600 hover:bg-red-50 py-3 rounded-lg font-medium transition-colors border border-red-200">
+                        <i class="fa-solid fa-arrow-right-from-bracket"></i>
+                        結束課堂
+                    </button>
+                </div>
+            </div>
+        </div>
+        <!-- 右側學生白板網格 -->
+        <div class="flex-grow p-6 overflow-y-auto bg-gray-100">
+            <div id="teacher-empty-state" class="h-full flex flex-col items-center justify-center text-gray-400">
+                <i class="fa-solid fa-users text-6xl mb-4 opacity-50"></i>
+                <p class="text-xl font-medium">等待學生加入中...</p>
+                <p class="mt-2">請學生掃描左側 QR Code 或輸入房間代碼</p>
+            </div>
+            <div id="teacher-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 hidden-view">
+                <!-- 學生畫布動態生成於此 -->
+            </div>
+        </div>
+    </div>
+
+    <!-- 學生白板視圖 -->
+    <div id="student-view" class="hidden-view flex-col h-screen bg-gray-200">
+        <!-- 頂部工具列 -->
+        <div class="bg-white shadow-sm p-2 flex flex-wrap items-center justify-between gap-2 shrink-0 z-10">
+            <div class="flex items-center gap-4">
+                <div class="bg-indigo-100 text-indigo-800 px-3 py-1 rounded-full text-sm font-medium flex items-center gap-2">
+                    <span class="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></span>
+                    房間: <span id="student-room-display"></span>
+                </div>
+                <span id="student-name-display" class="text-gray-600 font-semibold hidden sm:inline"></span>
+            </div>
+
+            <div class="flex items-center gap-2 bg-gray-100 p-1 rounded-xl">
+                <!-- 顏色選擇 -->
+                <div class="flex gap-1 pr-2 border-r border-gray-300" id="color-picker">
+                    <!-- 顏色按鈕由 JS 生成 -->
+                </div>
+                
+                <!-- 工具選擇 -->
+                <button id="tool-pen" class="tool-btn p-2 rounded-lg bg-indigo-100 text-indigo-600" title="畫筆">
+                    <i class="fa-solid fa-pen"></i>
+                </button>
+                <button id="tool-eraser" class="tool-btn p-2 rounded-lg text-gray-600 hover:bg-gray-200" title="橡皮擦">
+                    <i class="fa-solid fa-eraser"></i>
+                </button>
+                
+                <div class="w-px h-6 bg-gray-300 mx-1"></div>
+                
+                <!-- 清除 -->
+                <button id="btn-clear-board" class="p-2 text-red-600 hover:bg-red-50 rounded-lg flex items-center gap-1" title="全部清除">
+                    <i class="fa-solid fa-trash-can"></i>
+                    <span class="text-sm font-medium hidden sm:inline">清除</span>
+                </button>
+            </div>
+
+            <button id="btn-leave-room" class="text-gray-500 hover:text-gray-800 p-2" title="離開教室">
+                <i class="fa-solid fa-arrow-right-from-bracket text-xl"></i>
+            </button>
+        </div>
+        <!-- 繪圖區域 -->
+        <div id="canvas-container" class="flex-grow relative overflow-hidden bg-white shadow-inner">
+            <canvas id="student-canvas" class="absolute inset-0 cursor-crosshair bg-white"></canvas>
+        </div>
+    </div>
+
+    <!-- Firebase SDK 與主程式邏輯 -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Firebase 設置 (請遵循 Rule 3 確保認證)
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-html-whiteboard';
+
+        // 全域狀態
+        let currentUser = null;
+        let currentRoomId = '';
+        let currentStudentName = '';
+        let teacherUnsubscribe = null;
+
+        // 畫布狀態
+        let isDrawing = false;
+        let selectedColor = '#000000';
+        let currentTool = 'pen'; // 'pen' or 'eraser'
+        let penLineWidth = 3;
+        let eraserLineWidth = 20;
+
+        // DOM 元素取得
+        const views = {
+            loading: document.getElementById('loading-view'),
+            home: document.getElementById('home-view'),
+            studentJoin: document.getElementById('student-join-view'),
+            teacher: document.getElementById('teacher-view'),
+            student: document.getElementById('student-view')
+        };
+
+        // ===== 1. 初始化與認證 =====
+        async function initApp() {
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (err) {
+                console.error("認證失敗:", err);
+                alert("無法連接伺服器，請重試。");
+            }
+
+            onAuthStateChanged(auth, (user) => {
+                if (user) {
+                    currentUser = user;
+                    checkUrlParams();
+                }
+            });
+        }
+
+        // ===== 2. 視圖切換邏輯 =====
+        function showView(viewName) {
+            Object.values(views).forEach(v => v.classList.add('hidden-view'));
+            views[viewName].classList.remove('hidden-view');
+            views[viewName].style.display = 'flex';
+        }
+
+        function checkUrlParams() {
+            const params = new URLSearchParams(window.location.search);
+            const roomParam = params.get('room');
+            if (roomParam) {
+                document.getElementById('input-room-id').value = roomParam;
+                showView('studentJoin');
+            } else {
+                showView('home');
+            }
+        }
+
+        // ===== 3. 首頁與加入邏輯 =====
+        document.getElementById('btn-create-room').addEventListener('click', () => {
+            // 生成 6 位數房間代碼
+            currentRoomId = Math.floor(100000 + Math.random() * 900000).toString();
+            setupTeacherDashboard();
+            showView('teacher');
+        });
+
+        document.getElementById('btn-go-join').addEventListener('click', () => {
+            showView('studentJoin');
+        });
+
+        document.getElementById('btn-back-home').addEventListener('click', () => {
+            showView('home');
+        });
+
+        document.getElementById('join-form').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const roomIdVal = document.getElementById('input-room-id').value.trim();
+            const nameVal = document.getElementById('input-student-name').value.trim();
+            const errorEl = document.getElementById('join-error');
+
+            if (!roomIdVal) { errorEl.textContent = "請輸入房間代碼"; errorEl.classList.remove('hidden-view'); return; }
+            if (!nameVal) { errorEl.textContent = "請輸入你的姓名"; errorEl.classList.remove('hidden-view'); return; }
+            
+            errorEl.classList.add('hidden-view');
+            currentRoomId = roomIdVal;
+            currentStudentName = nameVal;
+            
+            setupStudentWhiteboard();
+            showView('student');
+        });
+
+        function leaveRoom() {
+            if (teacherUnsubscribe) {
+                teacherUnsubscribe();
+                teacherUnsubscribe = null;
+            }
+            currentRoomId = '';
+            currentStudentName = '';
+            // 清除網址參數但不刷新頁面
+            window.history.pushState({}, document.title, window.location.pathname);
+            showView('home');
+        }
+
+        document.getElementById('btn-end-class').addEventListener('click', leaveRoom);
+        document.getElementById('btn-leave-room').addEventListener('click', leaveRoom);
+
+        // ===== 4. 老師主機邏輯 =====
+        function setupTeacherDashboard() {
+            document.getElementById('teacher-room-display').textContent = currentRoomId;
+            
+            // 建立 QR Code
+            const currentUrl = window.location.href.split('?')[0];
+            const urlWithRoom = `${currentUrl}?room=${currentRoomId}`;
+            const qrImg = document.getElementById('qr-code-img');
+            qrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(urlWithRoom)}`;
+            qrImg.classList.remove('hidden');
+
+            document.getElementById('teacher-grid').innerHTML = '';
+            document.getElementById('teacher-empty-state').classList.remove('hidden-view');
+            document.getElementById('teacher-grid').classList.add('hidden-view');
+            
+            listenToStudents();
+        }
+
+        function listenToStudents() {
+            if (!currentUser || !currentRoomId) return;
+
+            const collectionName = `whiteboard_room_${currentRoomId}`;
+            const q = collection(db, 'artifacts', appId, 'public', 'data', collectionName);
+
+            teacherUnsubscribe = onSnapshot(q, (snapshot) => {
+                const students = [];
+                snapshot.forEach(doc => {
+                    students.push({ id: doc.id, ...doc.data() });
+                });
+
+                students.sort((a, b) => a.joinedAt - b.joinedAt);
+                renderTeacherGrid(students);
+            }, (error) => {
+                console.error("監聽白板數據失敗:", error);
+            });
+        }
+
+        function renderTeacherGrid(students) {
+            document.getElementById('student-count').textContent = `已連接學生：${students.length} 人`;
+            
+            const emptyState = document.getElementById('teacher-empty-state');
+            const grid = document.getElementById('teacher-grid');
+
+            if (students.length === 0) {
+                emptyState.classList.remove('hidden-view');
+                grid.classList.add('hidden-view');
+                return;
+            } else {
+                emptyState.classList.add('hidden-view');
+                grid.classList.remove('hidden-view');
+            }
+
+            // 使用比對更新 DOM 避免圖片閃爍
+            const existingIds = new Set(Array.from(grid.children).map(child => child.id.replace('card-', '')));
+            const newIds = new Set(students.map(s => s.id));
+
+            // 移除退出房間的學生
+            existingIds.forEach(id => {
+                if (!newIds.has(id)) {
+                    document.getElementById(`card-${id}`).remove();
+                }
+            });
+
+            // 更新或新增學生畫布
+            students.forEach(student => {
+                let card = document.getElementById(`card-${student.id}`);
+                
+                if (!card) {
+                    card = document.createElement('div');
+                    card.id = `card-${student.id}`;
+                    card.className = "bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col";
+                    card.innerHTML = `
+                        <div class="bg-gray-50 px-4 py-2 border-b border-gray-200 flex items-center justify-between">
+                            <span class="font-semibold text-gray-700 truncate" id="name-${student.id}"></span>
+                            <span class="text-xs text-gray-400" id="time-${student.id}"></span>
+                        </div>
+                        <div class="aspect-[4/3] bg-white w-full relative">
+                            <img id="img-${student.id}" src="" alt="白板" class="absolute inset-0 w-full h-full object-contain hidden" />
+                            <div id="blank-${student.id}" class="absolute inset-0 flex items-center justify-center text-gray-300">
+                                <p>空白畫布</p>
+                            </div>
+                        </div>
+                    `;
+                    grid.appendChild(card);
+                }
+
+                document.getElementById(`name-${student.id}`).textContent = student.userName;
+                
+                const timeStr = student.lastUpdate ? new Date(student.lastUpdate).toLocaleTimeString() : '';
+                document.getElementById(`time-${student.id}`).textContent = timeStr;
+
+                const imgEl = document.getElementById(`img-${student.id}`);
+                const blankEl = document.getElementById(`blank-${student.id}`);
+
+                if (student.canvasData) {
+                    if (imgEl.src !== student.canvasData) {
+                        imgEl.src = student.canvasData;
+                    }
+                    imgEl.classList.remove('hidden');
+                    blankEl.classList.add('hidden');
+                } else {
+                    imgEl.classList.add('hidden');
+                    blankEl.classList.remove('hidden');
+                }
+            });
+        }
+
+        // ===== 5. 學生白板邏輯 =====
+        const canvas = document.getElementById('student-canvas');
+        const ctx = canvas.getContext('2d');
+        const container = document.getElementById('canvas-container');
+
+        function setupStudentWhiteboard() {
+            document.getElementById('student-room-display').textContent = currentRoomId;
+            document.getElementById('student-name-display').textContent = `${currentStudentName} 的白板`;
+            
+            initColorPicker();
+            resizeCanvas();
+            clearCanvas(false); // 初始化全白背景，暫不同步
+            syncCanvasToFirebase(); // 加入時發送一次空畫布
+        }
+
+        // 處理畫布大小
+        function resizeCanvas() {
+            const tempImageData = canvas.toDataURL();
+            canvas.width = container.clientWidth;
+            canvas.height = container.clientHeight;
+            
+            if (tempImageData && tempImageData !== "data:,") {
+                const img = new Image();
+                img.onload = () => ctx.drawImage(img, 0, 0);
+                img.src = tempImageData;
+            } else {
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+        }
+        window.addEventListener('resize', resizeCanvas);
+
+        // 工具列邏輯
+        const colors = ['#000000', '#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6'];
+        
+        function initColorPicker() {
+            const picker = document.getElementById('color-picker');
+            picker.innerHTML = '';
+            colors.forEach(c => {
+                const btn = document.createElement('button');
+                btn.className = `w-8 h-8 rounded-full border-2 transition-transform color-btn`;
+                btn.style.backgroundColor = c;
+                btn.onclick = () => selectColor(c, btn);
+                picker.appendChild(btn);
+            });
+            // 預設選擇黑色
+            selectColor(colors[0], picker.children[0]);
+        }
+
+        function selectColor(c, btnEl) {
+            selectedColor = c;
+            setTool('pen');
+            document.querySelectorAll('.color-btn').forEach(b => {
+                b.classList.remove('border-gray-800', 'scale-110');
+                b.classList.add('border-transparent', 'hover:scale-110');
+            });
+            if(btnEl) {
+                btnEl.classList.add('border-gray-800', 'scale-110');
+                btnEl.classList.remove('border-transparent', 'hover:scale-110');
+            }
+        }
+
+        function setTool(t) {
+            currentTool = t;
+            const penBtn = document.getElementById('tool-pen');
+            const eraserBtn = document.getElementById('tool-eraser');
+            
+            if(t === 'pen') {
+                penBtn.className = "tool-btn p-2 rounded-lg bg-indigo-100 text-indigo-600";
+                eraserBtn.className = "tool-btn p-2 rounded-lg text-gray-600 hover:bg-gray-200";
+            } else {
+                eraserBtn.className = "tool-btn p-2 rounded-lg bg-indigo-100 text-indigo-600";
+                penBtn.className = "tool-btn p-2 rounded-lg text-gray-600 hover:bg-gray-200";
+            }
+        }
+
+        document.getElementById('tool-pen').addEventListener('click', () => setTool('pen'));
+        document.getElementById('tool-eraser').addEventListener('click', () => setTool('eraser'));
+        document.getElementById('btn-clear-board').addEventListener('click', () => clearCanvas(true));
+
+        function clearCanvas(shouldSync = true) {
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            if (shouldSync) syncCanvasToFirebase();
+        }
+
+        // 繪圖事件處理 (滑鼠與觸控)
+        function getPos(e) {
+            const rect = canvas.getBoundingClientRect();
+            if (e.touches && e.touches.length > 0) {
+                return {
+                    x: e.touches[0].clientX - rect.left,
+                    y: e.touches[0].clientY - rect.top
+                };
+            }
+            return {
+                x: e.clientX - rect.left,
+                y: e.clientY - rect.top
+            };
+        }
+
+        function startDraw(e) {
+            isDrawing = true;
+            const { x, y } = getPos(e);
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+        }
+
+        function draw(e) {
+            if (!isDrawing) return;
+            // 阻止預設行為避免拖曳畫面
+            if (e.cancelable) e.preventDefault(); 
+            
+            const { x, y } = getPos(e);
+            ctx.lineTo(x, y);
+            ctx.strokeStyle = currentTool === 'eraser' ? '#ffffff' : selectedColor;
+            ctx.lineWidth = currentTool === 'eraser' ? eraserLineWidth : penLineWidth;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.stroke();
+        }
+
+        function endDraw() {
+            if (isDrawing) {
+                ctx.closePath();
+                isDrawing = false;
+                syncCanvasToFirebase(); // 提筆時同步
+            }
+        }
+
+        canvas.addEventListener('mousedown', startDraw);
+        canvas.addEventListener('mousemove', draw);
+        window.addEventListener('mouseup', endDraw); // 使用 window 避免在畫布外放開沒偵測到
+        
+        canvas.addEventListener('touchstart', startDraw, { passive: false });
+        canvas.addEventListener('touchmove', draw, { passive: false });
+        window.addEventListener('touchend', endDraw);
+
+        // 同步至 Firebase
+        async function syncCanvasToFirebase() {
+            if (!currentUser || !currentRoomId) return;
+
+            const collectionName = `whiteboard_room_${currentRoomId}`;
+            const docRef = doc(db, 'artifacts', appId, 'public', 'data', collectionName, currentUser.uid);
+            
+            try {
+                const canvasData = canvas.toDataURL('image/jpeg', 0.5); // 壓縮為 jpeg 加快同步
+                await setDoc(docRef, {
+                    userName: currentStudentName,
+                    canvasData: canvasData,
+                    lastUpdate: Date.now(),
+                    joinedAt: Date.now() // 單純供排序用
+                }, { merge: true });
+            } catch (error) {
+                console.error("同步畫布失敗:", error);
+            }
+        }
+
+        // 啟動程式
+        initApp();
+
+    </script>
+</body>
+</html>
