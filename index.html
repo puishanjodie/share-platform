@@ -96,7 +96,8 @@
                 </p>
 
                 <!-- 老師小白板 -->
-                <div class="w-full bg-white p-3 rounded-xl shadow-sm border border-gray-200 mb-6 shrink-0">
+                <div id="mini-backdrop" class="fixed inset-0 bg-gray-900 bg-opacity-70 z-50 hidden"></div>
+                <div id="teacher-mini-wrapper" class="w-full bg-white p-3 rounded-xl shadow-sm border border-gray-200 mb-6 shrink-0 relative transition-all duration-300">
                     <div class="flex justify-between items-center mb-2">
                         <span class="text-sm font-bold text-gray-700 flex items-center gap-1">
                             <i class="fa-solid fa-chalkboard-user text-indigo-600"></i> 老師小白板
@@ -106,9 +107,15 @@
                             <button id="btn-clear-mini" class="text-gray-400 hover:text-red-500 transition-colors" title="清除小白板">
                                 <i class="fa-solid fa-trash-can"></i>
                             </button>
+                            <button id="btn-enlarge-mini" class="text-gray-400 hover:text-indigo-600 transition-colors" title="放大">
+                                <i class="fa-solid fa-expand"></i>
+                            </button>
+                            <button id="btn-shrink-mini" class="text-gray-600 hover:text-indigo-600 transition-colors hidden" title="縮小">
+                                <i class="fa-solid fa-compress text-xl"></i>
+                            </button>
                         </div>
                     </div>
-                    <div class="relative w-full aspect-[4/3] bg-gray-50 rounded border border-gray-200 overflow-hidden">
+                    <div id="teacher-mini-canvas-container" class="relative w-full aspect-[4/3] bg-gray-50 rounded border border-gray-200 overflow-hidden">
                         <canvas id="teacher-mini-canvas" class="absolute inset-0 w-full h-full cursor-crosshair bg-white"></canvas>
                     </div>
                 </div>
@@ -622,8 +629,15 @@
         // ===== 老師小白板邏輯 =====
         const miniCanvas = document.getElementById('teacher-mini-canvas');
         const miniCtx = miniCanvas.getContext('2d');
+        const miniWrapper = document.getElementById('teacher-mini-wrapper');
+        const miniCanvasContainer = document.getElementById('teacher-mini-canvas-container');
+        const miniBackdrop = document.getElementById('mini-backdrop');
+        const btnEnlargeMini = document.getElementById('btn-enlarge-mini');
+        const btnShrinkMini = document.getElementById('btn-shrink-mini');
+        
         let miniIsDrawing = false;
         let miniColor = '#2563eb'; // 預設藍筆
+        let isMiniEnlarged = false;
 
         function initMiniCanvas() {
             const rect = miniCanvas.parentElement.getBoundingClientRect();
@@ -644,6 +658,41 @@
                 img.src = temp;
             }
         });
+
+        // 放大/縮小功能
+        function toggleMiniSize() {
+            const temp = miniCanvas.toDataURL(); // 儲存目前的筆跡
+            isMiniEnlarged = !isMiniEnlarged;
+
+            if (isMiniEnlarged) {
+                miniBackdrop.classList.remove('hidden');
+                miniWrapper.classList.remove('w-full', 'mb-6', 'relative');
+                miniWrapper.classList.add('fixed', 'inset-4', 'md:inset-10', 'z-[60]', 'flex', 'flex-col');
+                miniCanvasContainer.classList.remove('w-full');
+                miniCanvasContainer.classList.add('h-full', 'mx-auto');
+                btnEnlargeMini.classList.add('hidden');
+                btnShrinkMini.classList.remove('hidden');
+            } else {
+                miniBackdrop.classList.add('hidden');
+                miniWrapper.classList.remove('fixed', 'inset-4', 'md:inset-10', 'z-[60]', 'flex', 'flex-col');
+                miniWrapper.classList.add('w-full', 'mb-6', 'relative');
+                miniCanvasContainer.classList.remove('h-full', 'mx-auto');
+                miniCanvasContainer.classList.add('w-full');
+                btnEnlargeMini.classList.remove('hidden');
+                btnShrinkMini.classList.add('hidden');
+            }
+
+            // 等待 CSS 動畫與佈局完成後，重新計算解析度並還原筆跡 (確保畫質清晰不失真)
+            setTimeout(() => {
+                initMiniCanvas();
+                const img = new Image();
+                img.onload = () => miniCtx.drawImage(img, 0, 0, miniCanvas.width, miniCanvas.height);
+                img.src = temp;
+            }, 50);
+        }
+
+        btnEnlargeMini.addEventListener('click', toggleMiniSize);
+        btnShrinkMini.addEventListener('click', toggleMiniSize);
 
         document.getElementById('btn-mini-color').addEventListener('click', (e) => {
             if (miniColor === '#2563eb') {
@@ -683,7 +732,11 @@
             const { x, y } = getMiniPos(e);
             miniCtx.lineTo(x, y);
             miniCtx.strokeStyle = miniColor;
-            miniCtx.lineWidth = 3;
+            
+            // 動態調整筆觸粗細：放大時筆觸自動變粗，縮小時自動變細，保持視覺比例一致
+            const scaleBase = Math.max(1, (miniCanvas.width / 300));
+            miniCtx.lineWidth = 3 * scaleBase;
+            
             miniCtx.lineCap = 'round';
             miniCtx.lineJoin = 'round';
             miniCtx.stroke();
