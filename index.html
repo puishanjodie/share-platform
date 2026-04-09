@@ -179,7 +179,8 @@
                     <span class="text-sm font-medium hidden sm:inline">拍照</span>
                 </button>
                 <!-- 隱藏的檔案上傳標籤，指定 image/* 和 capture="environment" 優先呼叫後置鏡頭 -->
-                <input type="file" id="camera-input" accept="image/*" capture="environment" class="hidden">
+                <!-- 使用 inline style 避免 Tailwind 類別影響了觸發事件 -->
+                <input type="file" id="camera-input" accept="image/*" capture="environment" style="display: none;">
                 
                 <div class="w-px h-6 bg-gray-300 mx-1"></div>
                 
@@ -780,6 +781,11 @@
             const file = e.target.files[0];
             if (!file) return;
 
+            // 修正 1：顯示「處理中」載入提示，防止學生以為沒反應
+            const originalBtnHTML = btnCamera.innerHTML;
+            btnCamera.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span class="text-sm font-medium hidden sm:inline">處理中</span>';
+            btnCamera.disabled = true;
+
             const reader = new FileReader();
             reader.onload = function(event) {
                 const img = new Image();
@@ -806,13 +812,30 @@
                     
                     // 畫完後立即同步照片給老師
                     syncCanvasToFirebase();
+
+                    // 修正 2：確保圖片讀取完畢後，才恢復按鈕與清空暫存
+                    btnCamera.innerHTML = originalBtnHTML;
+                    btnCamera.disabled = false;
+                    cameraInput.value = '';
+                };
+                
+                img.onerror = function() {
+                    alert("圖片處理失敗，請重新拍攝");
+                    btnCamera.innerHTML = originalBtnHTML;
+                    btnCamera.disabled = false;
+                    cameraInput.value = '';
                 };
                 img.src = event.target.result;
             };
-            reader.readAsDataURL(file);
             
-            // 清空 input，確保下次拍同一張也能觸發更新
-            cameraInput.value = '';
+            reader.onerror = function() {
+                alert("讀取檔案失敗");
+                btnCamera.innerHTML = originalBtnHTML;
+                btnCamera.disabled = false;
+                cameraInput.value = '';
+            };
+            
+            reader.readAsDataURL(file);
         });
 
         initApp();
