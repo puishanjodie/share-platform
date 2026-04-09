@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         /* 防止畫布在觸控時發生滾動或縮放行為 */
-        #student-canvas, #teacher-modal-canvas {
+        #student-canvas, #teacher-modal-canvas, #teacher-mini-canvas {
             touch-action: none; 
         }
         .hidden-view {
@@ -91,9 +91,28 @@
                 <div class="bg-white p-2 rounded-xl shadow-sm border border-gray-200 mb-4">
                     <img id="qr-code-img" src="" alt="QR Code" class="w-40 h-40 object-contain hidden" />
                 </div>
-                <p class="text-xs text-gray-400 text-center mb-8">
+                <p class="text-xs text-gray-400 text-center mb-6">
                     讓學生使用 iPad 掃描此 QR Code，或輸入房間代碼加入
                 </p>
+
+                <!-- 老師小白板 -->
+                <div class="w-full bg-white p-3 rounded-xl shadow-sm border border-gray-200 mb-6 shrink-0">
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="text-sm font-bold text-gray-700 flex items-center gap-1">
+                            <i class="fa-solid fa-chalkboard-user text-indigo-600"></i> 老師小白板
+                        </span>
+                        <div class="flex items-center gap-3">
+                            <button id="btn-mini-color" class="w-5 h-5 rounded-full bg-blue-600 border border-gray-300 shadow-inner" title="切換顏色"></button>
+                            <button id="btn-clear-mini" class="text-gray-400 hover:text-red-500 transition-colors" title="清除小白板">
+                                <i class="fa-solid fa-trash-can"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="relative w-full aspect-[4/3] bg-gray-50 rounded border border-gray-200 overflow-hidden">
+                        <canvas id="teacher-mini-canvas" class="absolute inset-0 w-full h-full cursor-crosshair bg-white"></canvas>
+                    </div>
+                </div>
+
                 <div class="mt-auto w-full space-y-4">
                     <div class="flex items-center gap-2 text-gray-600 bg-gray-50 p-3 rounded-lg">
                         <i class="fa-solid fa-users"></i>
@@ -370,6 +389,9 @@
             
             currentStudentsDict = {};
             listenToStudents();
+            
+            // 初始化老師側邊欄的小白板
+            setTimeout(initMiniCanvas, 100);
         }
 
         function listenToStudents() {
@@ -596,6 +618,90 @@
                 console.error("同步批改畫面失敗:", error);
             }
         }
+
+        // ===== 老師小白板邏輯 =====
+        const miniCanvas = document.getElementById('teacher-mini-canvas');
+        const miniCtx = miniCanvas.getContext('2d');
+        let miniIsDrawing = false;
+        let miniColor = '#2563eb'; // 預設藍筆
+
+        function initMiniCanvas() {
+            const rect = miniCanvas.parentElement.getBoundingClientRect();
+            if (rect.width > 0) {
+                miniCanvas.width = rect.width;
+                miniCanvas.height = rect.height;
+                miniCtx.fillStyle = '#ffffff';
+                miniCtx.fillRect(0, 0, miniCanvas.width, miniCanvas.height);
+            }
+        }
+
+        window.addEventListener('resize', () => {
+            if (!document.getElementById('teacher-view').classList.contains('hidden-view')) {
+                const temp = miniCanvas.toDataURL();
+                initMiniCanvas();
+                const img = new Image();
+                img.onload = () => miniCtx.drawImage(img, 0, 0, miniCanvas.width, miniCanvas.height);
+                img.src = temp;
+            }
+        });
+
+        document.getElementById('btn-mini-color').addEventListener('click', (e) => {
+            if (miniColor === '#2563eb') {
+                miniColor = '#ef4444'; // 變紅筆
+                e.target.className = 'w-5 h-5 rounded-full bg-red-500 border border-gray-300 shadow-inner';
+            } else {
+                miniColor = '#2563eb'; // 變藍筆
+                e.target.className = 'w-5 h-5 rounded-full bg-blue-600 border border-gray-300 shadow-inner';
+            }
+        });
+
+        document.getElementById('btn-clear-mini').addEventListener('click', () => {
+            miniCtx.fillStyle = '#ffffff';
+            miniCtx.fillRect(0, 0, miniCanvas.width, miniCanvas.height);
+        });
+
+        function getMiniPos(e) {
+            const rect = miniCanvas.getBoundingClientRect();
+            const scaleX = miniCanvas.width / rect.width;
+            const scaleY = miniCanvas.height / rect.height;
+            if (e.touches && e.touches.length > 0) {
+                return { x: (e.touches[0].clientX - rect.left) * scaleX, y: (e.touches[0].clientY - rect.top) * scaleY };
+            }
+            return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
+        }
+
+        function startMiniDraw(e) {
+            miniIsDrawing = true;
+            const { x, y } = getMiniPos(e);
+            miniCtx.beginPath();
+            miniCtx.moveTo(x, y);
+        }
+
+        function drawMini(e) {
+            if (!miniIsDrawing) return;
+            if (e.cancelable) e.preventDefault();
+            const { x, y } = getMiniPos(e);
+            miniCtx.lineTo(x, y);
+            miniCtx.strokeStyle = miniColor;
+            miniCtx.lineWidth = 3;
+            miniCtx.lineCap = 'round';
+            miniCtx.lineJoin = 'round';
+            miniCtx.stroke();
+        }
+
+        function endMiniDraw() {
+            if (miniIsDrawing) {
+                miniCtx.closePath();
+                miniIsDrawing = false;
+            }
+        }
+
+        miniCanvas.addEventListener('mousedown', startMiniDraw);
+        miniCanvas.addEventListener('mousemove', drawMini);
+        window.addEventListener('mouseup', endMiniDraw);
+        miniCanvas.addEventListener('touchstart', startMiniDraw, { passive: false });
+        miniCanvas.addEventListener('touchmove', drawMini, { passive: false });
+        window.addEventListener('touchend', endMiniDraw);
 
         // ===== 5. 學生白板邏輯 =====
         const canvas = document.getElementById('student-canvas');
